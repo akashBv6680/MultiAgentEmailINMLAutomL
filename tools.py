@@ -15,11 +15,15 @@ TARGET_ACCURACY_MIN = 0.80
 TARGET_ACCURACY_MAX = 0.90
 
 @tool
-def download_dataset_from_email(subject_filter: str = 'Problem statement') -> pd.DataFrame:
+# --- FIX: Removed 'subject_filter' argument from signature ---
+def download_dataset_from_email() -> pd.DataFrame:
     """
     Connects to the email client, searches for the latest email with a data file (CSV), 
     downloads the attachment, and returns it as a pandas DataFrame.
     """
+    # Hardcode the filter inside the function body
+    subject_filter: str = 'Problem statement' 
+    
     AGENT_EMAIL = os.environ.get("AGENT_EMAIL")
     AGENT_PASSWORD = os.environ.get("AGENT_PASSWORD")
     
@@ -29,7 +33,7 @@ def download_dataset_from_email(subject_filter: str = 'Problem statement') -> pd
     print(f"Tool: Attempting to connect to email server for data... (Filter: '{subject_filter}')")
 
     try:
-        # 1. Connect to the IMAP server (EXPLICITLY using port 993 for reliability)
+        # Connect with explicit port 993 (to ensure IMAP stability)
         mail = imaplib.IMAP4_SSL('imap.gmail.com', 993) 
         mail.login(AGENT_EMAIL, AGENT_PASSWORD)
         mail.select('inbox')
@@ -41,7 +45,6 @@ def download_dataset_from_email(subject_filter: str = 'Problem statement') -> pd
             print(f"Tool: No NEW email found. Searching ALL emails with subject '{subject_filter}'.")
             status, email_ids = mail.search(None, 'ALL', 'HEADER', 'Subject', subject_filter)
             if not email_ids[0]:
-                # If this is the error, it means the email is missing or subject is wrong.
                 raise FileNotFoundError(f"No emails found with the subject filter: '{subject_filter}'.")
 
         latest_email_id = email_ids[0].split()[-1]
@@ -79,7 +82,7 @@ def download_dataset_from_email(subject_filter: str = 'Problem statement') -> pd
 
 @tool
 def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
-    """Performs PyCaret AutoML... (Code is unchanged)"""
+    """Performs PyCaret AutoML... (Unchanged)"""
     print("Tool: Starting PyCaret AutoML process...")
     try:
         target_col = df.columns[-1] 
@@ -102,7 +105,7 @@ def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
 
 @tool
 def send_client_email(subject: str, body: str, to_email: str) -> bool:
-    """Sends the final formatted email to the client. (Code is unchanged)"""
+    """Sends the final formatted email to the client. (Unchanged)"""
     AGENT_EMAIL = os.environ.get("AGENT_EMAIL")
     AGENT_PASSWORD = os.environ.get("AGENT_PASSWORD")
 
