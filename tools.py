@@ -15,7 +15,7 @@ TARGET_ACCURACY_MIN = 0.80
 TARGET_ACCURACY_MAX = 0.90
 
 @tool
-def download_dataset_from_email(subject_filter: str = 'Dataset Attached') -> pd.DataFrame:
+def download_dataset_from_email(subject_filter: str = 'Client Dataset') -> pd.DataFrame:
     """
     Connects to the email client, searches for the latest email with a data file (CSV), 
     downloads the attachment, and returns it as a pandas DataFrame.
@@ -49,7 +49,7 @@ def download_dataset_from_email(subject_filter: str = 'Dataset Attached') -> pd.
 
         msg = email.message_from_bytes(msg_data[0][1])
 
-        # 3. Find and Download the CSV Attachment
+        # 3. Find and Download the CSV/TXT Attachment
         for part in msg.walk():
             if part.get_content_maintype() == 'multipart':
                 continue
@@ -74,7 +74,7 @@ def download_dataset_from_email(subject_filter: str = 'Dataset Attached') -> pd.
         
     except Exception as e:
         print(f"Tool: Failed to fetch email or attachment. Error: {e}")
-        # Raising the error to halt the graph flow
+        # Re-raise the error so the LangGraph node can capture it
         raise
 
 @tool
@@ -85,16 +85,12 @@ def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
     """
     print("Tool: Starting PyCaret AutoML process...")
     try:
-        # Assumes the last column is the target variable
         target_col = df.columns[-1] 
-        
-        # PyCaret setup: auto-detects problem type (Classification/Regression/etc.)
         setup(df, target=target_col, silent=True, verbose=False, session_id=42)
         best_model = compare_models()
         metrics = pull()
         
-        # Extract accuracy (or primary metric)
-        primary_metric = metrics.columns[1] # e.g., Accuracy, R2, etc.
+        primary_metric = metrics.columns[1] 
         best_metric_value = metrics.loc[metrics['Model'] == best_model.__class__.__name__, primary_metric].iloc[0]
         
         report = (
