@@ -4,7 +4,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pycaret.classification import setup, compare_models, pull
-from langchain.tools import tool
+from langchain.tools import tool # <-- LEAVE THIS IMPORT for other tools
 import imaplib
 import email
 import io
@@ -14,8 +14,7 @@ import re
 TARGET_ACCURACY_MIN = 0.80
 TARGET_ACCURACY_MAX = 0.90
 
-@tool
-# --- FIX: Removed 'subject_filter' argument from signature ---
+# --- FIX: DELETED @tool DECORATOR ---
 def download_dataset_from_email() -> pd.DataFrame:
     """
     Connects to the email client, searches for the latest email with a data file (CSV), 
@@ -82,7 +81,7 @@ def download_dataset_from_email() -> pd.DataFrame:
 
 @tool
 def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
-    """Performs PyCaret AutoML... (Unchanged)"""
+    """Performs PyCaret AutoML... (Unchanged, keeps @tool)"""
     print("Tool: Starting PyCaret AutoML process...")
     try:
         target_col = df.columns[-1] 
@@ -105,7 +104,7 @@ def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
 
 @tool
 def send_client_email(subject: str, body: str, to_email: str) -> bool:
-    """Sends the final formatted email to the client. (Unchanged)"""
+    """Sends the final formatted email to the client. (Unchanged, keeps @tool)"""
     AGENT_EMAIL = os.environ.get("AGENT_EMAIL")
     AGENT_PASSWORD = os.environ.get("AGENT_PASSWORD")
 
