@@ -1,6 +1,6 @@
 import os
 import re
-import traceback # <-- NEW: Import for detailed error reporting
+import traceback 
 from typing import TypedDict, Optional
 from dotenv import load_dotenv
 import pandas as pd
@@ -37,21 +37,22 @@ class GraphState(TypedDict):
 
 # --- 3. AGENT NODES (TASKS) ---
 def ingest_data_node(state: GraphState) -> GraphState:
-    """Agent: Data Ingestion & Preparation (Enhanced with Traceback)"""
+    """Agent: Data Ingestion & Preparation (Corrected Tool Call)"""
     try:
-        # Calls the tool, now with explicit port 993 (assuming tools.py is updated)
-        df = download_dataset_from_email(subject_filter='Problem statement')
+        # --- FIX: Call the tool function with NO arguments ---
+        df = download_dataset_from_email() 
+        # ----------------------------------------------------
+        
         if df.shape[1] < 2:
             raise ValueError("Dataset has insufficient columns (less than 2).")
         return {"dataset": df, "error": None}
     except Exception as e:
-        # --- DEBUGGING ENHANCEMENT ---
+        # Debugging code remains
         print(f"Ingestion Agent caught exception: {e}")
-        # Get the full traceback to see where exactly it failed
         full_trace = traceback.format_exc()
         return {"error": f"Ingestion Agent failed: {e}\n\nFull Trace:\n{full_trace}"}
-        # -----------------------------
 
+# --- (All other nodes remain unchanged) ---
 def generate_eda_node(state: GraphState) -> GraphState:
     """Agent: EDA & Insight Generation (Uses Ollama)"""
     df = state.get("dataset")
@@ -109,23 +110,18 @@ def orchestrator_node(state: GraphState) -> GraphState:
     """Agent: Orchestrator, Monitoring, Approval, and Communication (Final Decision)"""
     accuracy = state.get("accuracy")
     
-    # This check is what you've been seeing, now we need to know why it got here!
     if accuracy is None:
         return {"error": "Orchestrator failed: Missing accuracy score."}
 
     status = "APPROVED" if TARGET_ACCURACY_MIN <= accuracy <= TARGET_ACCURACY_MAX else "REJECTED_LOW_ACCURACY"
         
-    # Email generation logic remains the same...
+    # Email generation logic remains the same... (omitted for brevity)
     if status == "APPROVED":
         subject = "SUCCESS: Comprehensive ML Analysis and Business Insights"
-        body = f"""Dear Client,
-        ... [Full Success Email Body] ...
-        """
-    else: # REJECTED_LOW_ACCURACY
+        body = "..."
+    else:
         subject = "URGENT: Request for More Data - Initial Model Accuracy Low"
-        body = f"""Dear Client,
-        ... [Full Failure Email Body] ...
-        """
+        body = "..."
     
     email_sent = send_client_email(subject, body, CLIENT_EMAIL_TARGET)
 
@@ -134,7 +130,7 @@ def orchestrator_node(state: GraphState) -> GraphState:
     return {"workflow_output": output_message, "error": None}
 
 
-# --- 4. LANGGRAPH WORKFLOW SETUP ---
+# --- 4. LANGGRAPH WORKFLOW SETUP (Unchanged) ---
 workflow = StateGraph(GraphState)
 workflow.add_node("ingest_data", ingest_data_node)
 workflow.add_node("generate_eda", generate_eda_node)
