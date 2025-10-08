@@ -4,7 +4,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pycaret.classification import setup, compare_models, pull
-from langchain.tools import tool # <-- LEAVE THIS IMPORT for other tools
+from langchain.tools import tool 
 import imaplib
 import email
 import io
@@ -14,7 +14,7 @@ import re
 TARGET_ACCURACY_MIN = 0.80
 TARGET_ACCURACY_MAX = 0.90
 
-# --- FIX: DELETED @tool DECORATOR ---
+# @tool decorator is REMOVED to prevent LangChain call conflicts
 def download_dataset_from_email() -> pd.DataFrame:
     """
     Connects to the email client, searches for the latest email with a data file (CSV), 
@@ -38,11 +38,18 @@ def download_dataset_from_email() -> pd.DataFrame:
         mail.select('inbox')
         
         # 2. Search for the latest email
-        status, email_ids = mail.search(None, 'UNSEEN', 'HEADER', 'Subject', subject_filter) 
+        # --- FIX: ROBUST IMAP SEARCH SYNTAX ---
+        # Uses explicit parentheses and quotes, which is required by Gmail IMAP
+        status, email_ids = mail.search(None, f'(UNSEEN SUBJECT "{subject_filter}")') 
+        # --------------------------------------
         
         if not email_ids[0]:
             print(f"Tool: No NEW email found. Searching ALL emails with subject '{subject_filter}'.")
-            status, email_ids = mail.search(None, 'ALL', 'HEADER', 'Subject', subject_filter)
+            
+            # --- FIX: ROBUST IMAP SEARCH SYNTAX for ALL emails ---
+            status, email_ids = mail.search(None, f'(ALL SUBJECT "{subject_filter}")') 
+            # ----------------------------------------------------
+            
             if not email_ids[0]:
                 raise FileNotFoundError(f"No emails found with the subject filter: '{subject_filter}'.")
 
