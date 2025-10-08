@@ -15,7 +15,8 @@ TARGET_ACCURACY_MIN = 0.80
 TARGET_ACCURACY_MAX = 0.90
 
 @tool
-def download_dataset_from_email(subject_filter: str = 'Client Dataset') -> pd.DataFrame:
+# --- FIXED DEFAULT SUBJECT FILTER ---
+def download_dataset_from_email(subject_filter: str = 'Problem statement') -> pd.DataFrame:
     """
     Connects to the email client, searches for the latest email with a data file (CSV), 
     downloads the attachment, and returns it as a pandas DataFrame.
@@ -26,6 +27,7 @@ def download_dataset_from_email(subject_filter: str = 'Client Dataset') -> pd.Da
     if not AGENT_EMAIL or not AGENT_PASSWORD:
         raise ValueError("Email credentials (AGENT_EMAIL, AGENT_PASSWORD) not found in environment.")
 
+    # Using the local Ollama service URL defined in the YAML
     print(f"Tool: Attempting to connect to email server for data... (Filter: '{subject_filter}')")
 
     try:
@@ -34,14 +36,14 @@ def download_dataset_from_email(subject_filter: str = 'Client Dataset') -> pd.Da
         mail.login(AGENT_EMAIL, AGENT_PASSWORD)
         mail.select('inbox')
         
-        # 2. Search for the latest email
+        # 2. Search for the latest email (searching for unseen or all with the subject)
         status, email_ids = mail.search(None, 'UNSEEN', 'HEADER', 'Subject', subject_filter) 
         
         if not email_ids[0]:
-            print("Tool: No new email found with the specified subject. Searching ALL emails.")
+            print(f"Tool: No NEW email found. Searching ALL emails with subject '{subject_filter}'.")
             status, email_ids = mail.search(None, 'ALL', 'HEADER', 'Subject', subject_filter)
             if not email_ids[0]:
-                raise FileNotFoundError("No emails found with the subject filter.")
+                raise FileNotFoundError(f"No emails found with the subject filter: '{subject_filter}'.")
 
         latest_email_id = email_ids[0].split()[-1]
         status, msg_data = mail.fetch(latest_email_id, '(RFC822)')
@@ -60,7 +62,6 @@ def download_dataset_from_email(subject_filter: str = 'Client Dataset') -> pd.Da
             if filename and (filename.endswith('.csv') or filename.endswith('.txt')):
                 payload = part.get_payload(decode=True)
                 
-                # Check for common encodings and load into pandas
                 try:
                     data = pd.read_csv(io.StringIO(payload.decode('utf-8')))
                 except UnicodeDecodeError:
@@ -74,22 +75,17 @@ def download_dataset_from_email(subject_filter: str = 'Client Dataset') -> pd.Da
         
     except Exception as e:
         print(f"Tool: Failed to fetch email or attachment. Error: {e}")
-        # Re-raise the error so the LangGraph node can capture it
         raise
 
 @tool
 def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
-    """
-    Performs PyCaret AutoML: auto-detects the problem type, trains models, 
-    and returns the best model's metrics and accuracy. Target column is assumed to be the last column.
-    """
+    """Performs PyCaret AutoML..."""
     print("Tool: Starting PyCaret AutoML process...")
     try:
         target_col = df.columns[-1] 
         setup(df, target=target_col, silent=True, verbose=False, session_id=42)
         best_model = compare_models()
         metrics = pull()
-        
         primary_metric = metrics.columns[1] 
         best_metric_value = metrics.loc[metrics['Model'] == best_model.__class__.__name__, primary_metric].iloc[0]
         
