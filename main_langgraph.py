@@ -1,11 +1,10 @@
 import os
 import re
+import traceback # <-- NEW: Import for detailed error reporting
 from typing import TypedDict, Optional
 from dotenv import load_dotenv
 import pandas as pd
 from langgraph.graph import StateGraph, END
-
-# --- REVERTED TO OLLAMA ---
 from langchain_community.chat_models import ChatOllama 
 
 # Import tools and constants
@@ -17,16 +16,14 @@ from tools import (
 load_dotenv()
 
 # --- 1. CONFIGURATION AND LLM SETUP ---
-# Fetch host and model name from the environment variables set in the YAML
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "tinyllama")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 CLIENT_EMAIL_TARGET = os.getenv("CLIENT_EMAIL_TARGET")
 
-# Initialize LLM using ChatOllama, pointing to the service URL
 llm = ChatOllama(model=LLM_MODEL_NAME, base_url=OLLAMA_HOST, temperature=0.1)
 
 
-# --- 2. LANGGRAPH STATE DEFINITION (No change) ---
+# --- 2. LANGGRAPH STATE DEFINITION ---
 class GraphState(TypedDict):
     """The shared state passed between agents."""
     dataset: Optional[pd.DataFrame]
@@ -39,32 +36,22 @@ class GraphState(TypedDict):
 
 
 # --- 3. AGENT NODES (TASKS) ---
-
-# --- (ingest_data_node, run_automl_node, orchestrator_node are unchanged) ---
-
 def ingest_data_node(state: GraphState) -> GraphState:
-    """Agent: Data Ingestion & Preparation"""
+    """Agent: Data Ingestion & Preparation (Enhanced with Traceback)"""
     try:
-        df = download_dataset_from_email(subject_filter='Client Dataset')
+        # Calls the tool, now with explicit port 993 (assuming tools.py is updated)
+        df = download_dataset_from_email(subject_filter='Problem statement')
         if df.shape[1] < 2:
             raise ValueError("Dataset has insufficient columns (less than 2).")
         return {"dataset": df, "error": None}
     except Exception as e:
-        return {"error": f"Ingestion Agent failed: {e}"}
+        # --- DEBUGGING ENHANCEMENT ---
+        print(f"Ingestion Agent caught exception: {e}")
+        # Get the full traceback to see where exactly it failed
+        full_trace = traceback.format_exc()
+        return {"error": f"Ingestion Agent failed: {e}\n\nFull Trace:\n{full_trace}"}
+        # -----------------------------
 
-def run_automl_node(state: GraphState) -> GraphState:
-    """Agent: PyCaret AutoML"""
-    df = state.get("dataset")
-    if df is None: return {"error": "No dataset for AutoML."}
-    try:
-        report = run_pycaret_auto_ml(df)
-        accuracy_match = re.search(r"Primary Metric \((.*?)\): (\d\.\d{4})", report)
-        accuracy = float(accuracy_match.group(2)) if accuracy_match else None
-        return {"ml_report": report, "accuracy": accuracy, "error": None}
-    except Exception as e:
-        return {"error": f"AutoML Agent failed: {e}"}
-
-# --- LLM-Dependent Nodes (Reverted to using ChatOllama via 'llm') ---
 def generate_eda_node(state: GraphState) -> GraphState:
     """Agent: EDA & Insight Generation (Uses Ollama)"""
     df = state.get("dataset")
@@ -82,7 +69,19 @@ def generate_eda_node(state: GraphState) -> GraphState:
         
         return {"eda_insights": eda_insights, "error": None}
     except Exception as e:
-        return {"error": f"EDA Agent failed: LLM Call Error: {e}"} # Added detail for debugging
+        return {"error": f"EDA Agent failed: LLM Call Error: {e}"} 
+
+def run_automl_node(state: GraphState) -> GraphState:
+    """Agent: PyCaret AutoML"""
+    df = state.get("dataset")
+    if df is None: return {"error": "No dataset for AutoML."}
+    try:
+        report = run_pycaret_auto_ml(df)
+        accuracy_match = re.search(r"Primary Metric \((.*?)\): (\d\.\d{4})", report)
+        accuracy = float(accuracy_match.group(2)) if accuracy_match else None
+        return {"ml_report": report, "accuracy": accuracy, "error": None}
+    except Exception as e:
+        return {"error": f"AutoML Agent failed: {e}"}
 
 def generate_rca_node(state: GraphState) -> GraphState:
     """Agent: Model Evaluation & RCA (Uses Ollama)"""
@@ -103,13 +102,14 @@ def generate_rca_node(state: GraphState) -> GraphState:
         
         return {"rca_business_impact": rca_business_impact, "error": None}
     except Exception as e:
-        return {"error": f"RCA Agent failed: LLM Call Error: {e}"} # Added detail for debugging
+        return {"error": f"RCA Agent failed: LLM Call Error: {e}"}
 
 
 def orchestrator_node(state: GraphState) -> GraphState:
     """Agent: Orchestrator, Monitoring, Approval, and Communication (Final Decision)"""
     accuracy = state.get("accuracy")
     
+    # This check is what you've been seeing, now we need to know why it got here!
     if accuracy is None:
         return {"error": "Orchestrator failed: Missing accuracy score."}
 
@@ -118,26 +118,23 @@ def orchestrator_node(state: GraphState) -> GraphState:
     # Email generation logic remains the same...
     if status == "APPROVED":
         subject = "SUCCESS: Comprehensive ML Analysis and Business Insights"
-        # ... body generation ...
         body = f"""Dear Client,
         ... [Full Success Email Body] ...
         """
     else: # REJECTED_LOW_ACCURACY
         subject = "URGENT: Request for More Data - Initial Model Accuracy Low"
-        # ... body generation ...
         body = f"""Dear Client,
         ... [Full Failure Email Body] ...
         """
     
-    # 3. Communication
     email_sent = send_client_email(subject, body, CLIENT_EMAIL_TARGET)
 
     output_message = f"Email sent successfully (Status: {status})" if email_sent else "Email failed to send."
     
     return {"workflow_output": output_message, "error": None}
 
-# --- 4. LANGGRAPH WORKFLOW SETUP (No change) ---
 
+# --- 4. LANGGRAPH WORKFLOW SETUP ---
 workflow = StateGraph(GraphState)
 workflow.add_node("ingest_data", ingest_data_node)
 workflow.add_node("generate_eda", generate_eda_node)
