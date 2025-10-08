@@ -1,0 +1,43 @@
+name: Agentic ML Workflow Scheduler (LangGraph)
+
+on:
+  schedule:
+    - cron: '0 9 * * *' # Runs daily at 9 AM UTC
+  workflow_dispatch: # Allows manual triggering
+
+jobs:
+  run_ml_agent:
+    runs-on: ubuntu-latest
+    
+    # Define LLM host (critical for local LLM usage)
+    env:
+      OLLAMA_HOST: http://localhost:11434 
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # NOTE: For this to work in GitHub Actions, you MUST use a self-hosted runner 
+      # that has Ollama running and the tinyllama model pulled, or use a setup 
+      # that tunnels to your local machine, as standard GitHub runners cannot 
+      # host persistent services like Ollama.
+      - name: Verify Ollama Setup (Placeholder for self-hosted setup)
+        run: echo "Assuming Ollama is accessible at ${OLLAMA_HOST} on the runner."
+
+      - name: Run LangGraph Multi-Agent Automation
+        run: python main_langgraph.py
+        env:
+          # Pass the GitHub Secrets as environment variables
+          AGENT_EMAIL: ${{ secrets.AGENT_EMAIL }}
+          AGENT_PASSWORD: ${{ secrets.AGENT_PASSWORD }}
+          CLIENT_EMAIL_TARGET: ${{ secrets.CLIENT_EMAIL_TARGET }}
