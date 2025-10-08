@@ -1,0 +1,14 @@
+# Core Agent and LLM Libraries
+langchain
+langchain-community
+langgraph
+pydantic
+python-dotenv
+
+# Data Science and AutoML
+pandas
+numpy
+pycaret
+
+# Email Handling
+# smtplib and email are built-in
