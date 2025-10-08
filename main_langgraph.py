@@ -1,15 +1,15 @@
 import os
 import re
-import traceback 
+import traceback # CRITICAL for debugging failures
 from typing import TypedDict, Optional
 from dotenv import load_dotenv
 import pandas as pd
 from langgraph.graph import StateGraph, END
 from langchain_community.chat_models import ChatOllama 
 
-# --- FIX: Only import the 'tools' module. DO NOT import specific names. ---
+# --- FIX: Only import the 'tools' module. This prevents LangChain wrapper issues. ---
 import tools 
-# -------------------------------------------------------------------------
+# ----------------------------------------------------------------------------------
 
 load_dotenv()
 
@@ -35,9 +35,9 @@ class GraphState(TypedDict):
 
 # --- 3. AGENT NODES (TASKS) ---
 def ingest_data_node(state: GraphState) -> GraphState:
-    """Agent: Data Ingestion & Preparation (FINAL TOOL CALL FIX)"""
+    """Agent: Data Ingestion & Preparation (Final Working Version)"""
     try:
-        # Calling the function using module prefix (tools.) ensures non-wrapped call
+        # Calls the function using module prefix (tools.) 
         df = tools.download_dataset_from_email() 
         
         if df.shape[1] < 2:
@@ -65,20 +65,28 @@ def generate_eda_node(state: GraphState) -> GraphState:
         
         return {"eda_insights": eda_insights, "error": None}
     except Exception as e:
+        # Keeping error handling simple here, as the LLM call is usually reliable
         return {"error": f"EDA Agent failed: LLM Call Error: {e}"} 
 
 def run_automl_node(state: GraphState) -> GraphState:
-    """Agent: PyCaret AutoML"""
+    """Agent: PyCaret AutoML (NOW WITH DEBUGGING)"""
     df = state.get("dataset")
     if df is None: return {"error": "No dataset for AutoML."}
+    
     try:
-        # --- FIX: Call using tools. prefix ---
+        # Calling the function using module prefix (tools.)
         report = tools.run_pycaret_auto_ml(df)
+        
         accuracy_match = re.search(r"Primary Metric \((.*?)\): (\d\.\d{4})", report)
         accuracy = float(accuracy_match.group(2)) if accuracy_match else None
+        
         return {"ml_report": report, "accuracy": accuracy, "error": None}
     except Exception as e:
-        return {"error": f"AutoML Agent failed: {e}"}
+        # --- CRITICAL DEBUG CODE ADDED HERE ---
+        print(f"AutoML Agent caught exception: {e}")
+        full_trace = traceback.format_exc()
+        return {"error": f"AutoML Agent failed: {e}\n\nFull Trace:\n{full_trace}"}
+        # --------------------------------------
 
 def generate_rca_node(state: GraphState) -> GraphState:
     """Agent: Model Evaluation & RCA (Uses Ollama)"""
@@ -106,13 +114,14 @@ def orchestrator_node(state: GraphState) -> GraphState:
     """Agent: Orchestrator, Monitoring, Approval, and Communication (Final Decision)"""
     accuracy = state.get("accuracy")
     
+    # This check is what you're seeing; the goal is to fix the node that fails *before* this.
     if accuracy is None:
         return {"error": "Orchestrator failed: Missing accuracy score."}
 
-    # --- FIX: Use tools. prefix for constants ---
+    # Using tools. prefix for constants
     status = "APPROVED" if tools.TARGET_ACCURACY_MIN <= accuracy <= tools.TARGET_ACCURACY_MAX else "REJECTED_LOW_ACCURACY"
         
-    # Email generation logic remains the same... (omitted for brevity)
+    # Email generation logic remains the same... 
     if status == "APPROVED":
         subject = "SUCCESS: Comprehensive ML Analysis and Business Insights"
         body = f"""Dear Client,
@@ -124,7 +133,7 @@ def orchestrator_node(state: GraphState) -> GraphState:
         ... [Full Failure Email Body] ...
         """
     
-    # --- FIX: Call using tools. prefix ---
+    # Calling the function using module prefix (tools.)
     email_sent = tools.send_client_email(subject, body, CLIENT_EMAIL_TARGET)
 
     output_message = f"Email sent successfully (Status: {status})" if email_sent else "Email failed to send."
