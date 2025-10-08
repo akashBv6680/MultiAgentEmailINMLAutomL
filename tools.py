@@ -4,7 +4,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pycaret.classification import setup, compare_models, pull
-from langchain.tools import tool 
+from langchain.tools import tool # We keep the import, but don't use it on utility functions
 import imaplib
 import email
 import io
@@ -14,7 +14,7 @@ import re
 TARGET_ACCURACY_MIN = 0.80
 TARGET_ACCURACY_MAX = 0.90
 
-# @tool decorator is REMOVED to prevent LangChain call conflicts
+# --- FIX: @tool decorator REMOVED from utility function to avoid Pydantic conflict ---
 def download_dataset_from_email() -> pd.DataFrame:
     """
     Connects to the email client, searches for the latest email with a data file (CSV), 
@@ -32,23 +32,17 @@ def download_dataset_from_email() -> pd.DataFrame:
     print(f"Tool: Attempting to connect to email server for data... (Filter: '{subject_filter}')")
 
     try:
-        # Connect with explicit port 993 (to ensure IMAP stability)
+        # Connect with explicit port 993 and robust search syntax (fixes BAD command error)
         mail = imaplib.IMAP4_SSL('imap.gmail.com', 993) 
         mail.login(AGENT_EMAIL, AGENT_PASSWORD)
         mail.select('inbox')
         
         # 2. Search for the latest email
-        # --- FIX: ROBUST IMAP SEARCH SYNTAX ---
-        # Uses explicit parentheses and quotes, which is required by Gmail IMAP
         status, email_ids = mail.search(None, f'(UNSEEN SUBJECT "{subject_filter}")') 
-        # --------------------------------------
         
         if not email_ids[0]:
             print(f"Tool: No NEW email found. Searching ALL emails with subject '{subject_filter}'.")
-            
-            # --- FIX: ROBUST IMAP SEARCH SYNTAX for ALL emails ---
             status, email_ids = mail.search(None, f'(ALL SUBJECT "{subject_filter}")') 
-            # ----------------------------------------------------
             
             if not email_ids[0]:
                 raise FileNotFoundError(f"No emails found with the subject filter: '{subject_filter}'.")
@@ -83,16 +77,16 @@ def download_dataset_from_email() -> pd.DataFrame:
         
     except Exception as e:
         print(f"Tool: Failed to fetch email or attachment. Error: {e}")
-        # Re-raise the exception so LangGraph catches the error
         raise
 
-@tool
+# --- FIX: @tool decorator REMOVED to avoid Pydantic conflict (DataFrame validation) ---
 def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
-    """Performs PyCaret AutoML... (Unchanged, keeps @tool)"""
+    """Performs PyCaret AutoML..."""
     print("Tool: Starting PyCaret AutoML process...")
     try:
         target_col = df.columns[-1] 
-        setup(df, target=target_col, silent=True, verbose=False, session_id=42)
+        # Using verbose=False and silent=True to reduce log output in the runner
+        setup(df, target=target_col, silent=True, verbose=False, session_id=42) 
         best_model = compare_models()
         metrics = pull()
         primary_metric = metrics.columns[1] 
@@ -107,11 +101,12 @@ def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
         print("Tool: PyCaret completed.")
         return report
     except Exception as e:
+        # Returning a clear error report if PyCaret fails
         return f"PyCaret Error: Failed to run AutoML. Error: {e}"
 
-@tool
+# --- FIX: @tool decorator REMOVED to avoid Pydantic conflict ---
 def send_client_email(subject: str, body: str, to_email: str) -> bool:
-    """Sends the final formatted email to the client. (Unchanged, keeps @tool)"""
+    """Sends the final formatted email to the client."""
     AGENT_EMAIL = os.environ.get("AGENT_EMAIL")
     AGENT_PASSWORD = os.environ.get("AGENT_PASSWORD")
 
