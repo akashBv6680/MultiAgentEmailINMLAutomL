@@ -7,16 +7,13 @@ import pandas as pd
 from langgraph.graph import StateGraph, END
 from langchain_community.chat_models import ChatOllama 
 
-# Import tools and constants
-from tools import run_pycaret_auto_ml, send_client_email, TARGET_ACCURACY_MIN, TARGET_ACCURACY_MAX
-
-# --- FIX: Import the download function under a new name to bypass the @tool wrapper ---
-from tools import download_dataset_from_email as _download_data_func 
-
+# --- FIX: Only import the 'tools' module. DO NOT import specific names. ---
+import tools 
+# -------------------------------------------------------------------------
 
 load_dotenv()
 
-# --- 1. CONFIGURATION AND LLM SETUP (Unchanged) ---
+# --- 1. CONFIGURATION AND LLM SETUP ---
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "tinyllama")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 CLIENT_EMAIL_TARGET = os.getenv("CLIENT_EMAIL_TARGET")
@@ -40,9 +37,8 @@ class GraphState(TypedDict):
 def ingest_data_node(state: GraphState) -> GraphState:
     """Agent: Data Ingestion & Preparation (FINAL TOOL CALL FIX)"""
     try:
-        # --- THE FINAL FIX: Call the function using its non-wrapped name ---
-        df = _download_data_func() 
-        # --------------------------------------------------------------------
+        # Calling the function using module prefix (tools.) ensures non-wrapped call
+        df = tools.download_dataset_from_email() 
         
         if df.shape[1] < 2:
             raise ValueError("Dataset has insufficient columns (less than 2).")
@@ -52,7 +48,6 @@ def ingest_data_node(state: GraphState) -> GraphState:
         full_trace = traceback.format_exc()
         return {"error": f"Ingestion Agent failed: {e}\n\nFull Trace:\n{full_trace}"}
 
-# --- (All other nodes remain unchanged) ---
 def generate_eda_node(state: GraphState) -> GraphState:
     """Agent: EDA & Insight Generation (Uses Ollama)"""
     df = state.get("dataset")
@@ -77,7 +72,8 @@ def run_automl_node(state: GraphState) -> GraphState:
     df = state.get("dataset")
     if df is None: return {"error": "No dataset for AutoML."}
     try:
-        report = run_pycaret_auto_ml(df)
+        # --- FIX: Call using tools. prefix ---
+        report = tools.run_pycaret_auto_ml(df)
         accuracy_match = re.search(r"Primary Metric \((.*?)\): (\d\.\d{4})", report)
         accuracy = float(accuracy_match.group(2)) if accuracy_match else None
         return {"ml_report": report, "accuracy": accuracy, "error": None}
@@ -113,7 +109,8 @@ def orchestrator_node(state: GraphState) -> GraphState:
     if accuracy is None:
         return {"error": "Orchestrator failed: Missing accuracy score."}
 
-    status = "APPROVED" if TARGET_ACCURACY_MIN <= accuracy <= TARGET_ACCURACY_MAX else "REJECTED_LOW_ACCURACY"
+    # --- FIX: Use tools. prefix for constants ---
+    status = "APPROVED" if tools.TARGET_ACCURACY_MIN <= accuracy <= tools.TARGET_ACCURACY_MAX else "REJECTED_LOW_ACCURACY"
         
     # Email generation logic remains the same... (omitted for brevity)
     if status == "APPROVED":
@@ -127,7 +124,8 @@ def orchestrator_node(state: GraphState) -> GraphState:
         ... [Full Failure Email Body] ...
         """
     
-    email_sent = send_client_email(subject, body, CLIENT_EMAIL_TARGET)
+    # --- FIX: Call using tools. prefix ---
+    email_sent = tools.send_client_email(subject, body, CLIENT_EMAIL_TARGET)
 
     output_message = f"Email sent successfully (Status: {status})" if email_sent else "Email failed to send."
     
