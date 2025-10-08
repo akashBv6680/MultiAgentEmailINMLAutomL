@@ -8,14 +8,15 @@ from langgraph.graph import StateGraph, END
 from langchain_community.chat_models import ChatOllama 
 
 # Import tools and constants
-from tools import (
-    download_dataset_from_email, run_pycaret_auto_ml, send_client_email,
-    TARGET_ACCURACY_MIN, TARGET_ACCURACY_MAX
-)
+from tools import run_pycaret_auto_ml, send_client_email, TARGET_ACCURACY_MIN, TARGET_ACCURACY_MAX
+
+# --- FIX: Import the download function under a new name to bypass the @tool wrapper ---
+from tools import download_dataset_from_email as _download_data_func 
+
 
 load_dotenv()
 
-# --- 1. CONFIGURATION AND LLM SETUP ---
+# --- 1. CONFIGURATION AND LLM SETUP (Unchanged) ---
 LLM_MODEL_NAME = os.getenv("LLM_MODEL_NAME", "tinyllama")
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 CLIENT_EMAIL_TARGET = os.getenv("CLIENT_EMAIL_TARGET")
@@ -23,7 +24,7 @@ CLIENT_EMAIL_TARGET = os.getenv("CLIENT_EMAIL_TARGET")
 llm = ChatOllama(model=LLM_MODEL_NAME, base_url=OLLAMA_HOST, temperature=0.1)
 
 
-# --- 2. LANGGRAPH STATE DEFINITION ---
+# --- 2. LANGGRAPH STATE DEFINITION (Unchanged) ---
 class GraphState(TypedDict):
     """The shared state passed between agents."""
     dataset: Optional[pd.DataFrame]
@@ -37,17 +38,16 @@ class GraphState(TypedDict):
 
 # --- 3. AGENT NODES (TASKS) ---
 def ingest_data_node(state: GraphState) -> GraphState:
-    """Agent: Data Ingestion & Preparation (Corrected Tool Call)"""
+    """Agent: Data Ingestion & Preparation (FINAL TOOL CALL FIX)"""
     try:
-        # --- FIX: Call the tool function with NO arguments ---
-        df = download_dataset_from_email() 
-        # ----------------------------------------------------
+        # --- THE FINAL FIX: Call the function using its non-wrapped name ---
+        df = _download_data_func() 
+        # --------------------------------------------------------------------
         
         if df.shape[1] < 2:
             raise ValueError("Dataset has insufficient columns (less than 2).")
         return {"dataset": df, "error": None}
     except Exception as e:
-        # Debugging code remains
         print(f"Ingestion Agent caught exception: {e}")
         full_trace = traceback.format_exc()
         return {"error": f"Ingestion Agent failed: {e}\n\nFull Trace:\n{full_trace}"}
@@ -118,10 +118,14 @@ def orchestrator_node(state: GraphState) -> GraphState:
     # Email generation logic remains the same... (omitted for brevity)
     if status == "APPROVED":
         subject = "SUCCESS: Comprehensive ML Analysis and Business Insights"
-        body = "..."
+        body = f"""Dear Client,
+        ... [Full Success Email Body] ...
+        """
     else:
         subject = "URGENT: Request for More Data - Initial Model Accuracy Low"
-        body = "..."
+        body = f"""Dear Client,
+        ... [Full Failure Email Body] ...
+        """
     
     email_sent = send_client_email(subject, body, CLIENT_EMAIL_TARGET)
 
