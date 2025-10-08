@@ -1,6 +1,6 @@
 # Core Agent and LLM Libraries
 langchain
-langchain-community
+langchain-community # For ChatOllama
 langgraph
 pydantic
 python-dotenv
@@ -9,6 +9,3 @@ python-dotenv
 pandas
 numpy
 pycaret
-
-# Email Handling
-# smtplib and email are built-in
