@@ -2,17 +2,35 @@ name: Agentic ML Workflow Scheduler (LangGraph)
 
 on:
   schedule:
-    - cron: ' */5 * * * * ' # Runs daily at 9 AM UTC
-  workflow_dispatch: # Allows manual triggering from the GitHub UI
+    - cron: '0 5 * * *'
+  workflow_dispatch: 
 
 jobs:
   run_ml_agent:
     runs-on: ubuntu-latest
+    
+    # --- START: Ollama Service Definition ---
+    services:
+      ollama_service:
+        # Use the latest Ollama image
+        image: ollama/ollama:latest 
+        ports:
+          # Maps the container port 11434 to the runner's localhost port 11434
+          - 11434:11434
+        options: >-
+          --name ollama_service
+          --health-cmd="ollama -v"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    # --- END: Ollama Service Definition ---
 
-    # Environment variables available to all steps in this job
     env:
+      # Set the host accessible by the Python script
       OLLAMA_HOST: http://localhost:11434
-
+      # Define the model to be pulled and used by the Python script
+      LLM_MODEL_NAME: tinyllama # We'll use tinyllama for efficiency
+      
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,17 +45,24 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # ⚠️ IMPORTANT NOTE:
-      # This workflow assumes it's running on a self-hosted runner
-      # with Ollama already installed and running with the required model (e.g., tinyllama).
-      - name: Verify Ollama Setup (Self-Hosted Check)
+      # --- CRITICAL STEP: Pull the required model into the service container ---
+      # This waits for the service to be healthy and then pulls the model.
+      - name: Pull Ollama Model
         run: |
-          echo "Verifying Ollama availability at $OLLAMA_HOST"
-          curl --fail $OLLAMA_HOST/api/tags || echo "Warning: Ollama may not be reachable."
+          # Wait for Ollama service to start and be healthy
+          for i in {1..10}; do 
+            curl -sSf ${OLLAMA_HOST} && break || sleep 5; 
+          done
+          # Pull the required model using the service endpoint
+          docker exec ollama_service ollama pull ${LLM_MODEL_NAME}
+        shell: bash
 
       - name: Run LangGraph Multi-Agent Automation
         run: python main_langgraph.py
         env:
+          # Pass the GitHub Secrets as environment variables
           AGENT_EMAIL: ${{ secrets.AGENT_EMAIL }}
           AGENT_PASSWORD: ${{ secrets.AGENT_PASSWORD }}
           CLIENT_EMAIL_TARGET: ${{ secrets.CLIENT_EMAIL_TARGET }}
+          # LLM_MODEL_NAME and OLLAMA_HOST are already set as job envs
+          OPENAI_API_KEY: "DUMMY_KEY" # Kept as a placeholder to avoid breaking the code, but it is not used now
