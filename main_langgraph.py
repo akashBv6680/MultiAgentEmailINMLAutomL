@@ -12,15 +12,13 @@ from tools import (
     TARGET_ACCURACY_MIN, TARGET_ACCURACY_MAX
 )
 
-# Load environment variables (secrets)
 load_dotenv()
 
 # --- 1. CONFIGURATION AND LLM SETUP ---
-MODEL_NAME = "tinyllama" # Ensure this model is pulled in Ollama
+MODEL_NAME = "tinyllama" 
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 CLIENT_EMAIL_TARGET = os.getenv("CLIENT_EMAIL_TARGET")
 
-# Initialize LLM for narrative generation and reasoning
 llm = ChatOllama(model=MODEL_NAME, base_url=OLLAMA_HOST, temperature=0.1)
 
 
@@ -43,12 +41,14 @@ def ingest_data_node(state: GraphState) -> GraphState:
     try:
         # Use the tool to download the email attachment
         df = download_dataset_from_email(subject_filter='Client Dataset')
-        # Check if the last column is suitable for ML target
+        
+        # Simple data quality check
         if df.shape[1] < 2:
             raise ValueError("Dataset has insufficient columns (less than 2).")
             
         return {"dataset": df, "error": None}
     except Exception as e:
+        # Crucial: Capture the error message
         return {"error": f"Ingestion Agent failed: {e}"}
 
 def generate_eda_node(state: GraphState) -> GraphState:
@@ -58,29 +58,32 @@ def generate_eda_node(state: GraphState) -> GraphState:
 
     print("Agent: EDA & Insight - Generating summary via LLM.")
     
-    # LLM Call (Agent 1): Generate simple, client-friendly insights
-    prompt = f"""
-    Based only on the data summary:\n{df.head().to_markdown()}\n and the columns: {df.columns.tolist()}. 
-    Generate a simple, non-technical, high-level **Insights** and **Conclusion** (max 5 lines) 
-    that a client can understand. Focus on the distribution of key features and their possible relation to the target ({df.columns[-1]}).
-    """
-    eda_insights = llm.invoke(prompt).content
-    
-    return {"eda_insights": eda_insights, "error": None}
+    try:
+        prompt = f"""
+        Based only on the data summary:\n{df.head().to_markdown()}\n and the columns: {df.columns.tolist()}. 
+        Generate a simple, non-technical, high-level **Insights** and **Conclusion** (max 5 lines) 
+        that a client can understand. Focus on the distribution of key features and their possible relation to the target ({df.columns[-1]}).
+        """
+        eda_insights = llm.invoke(prompt).content
+        
+        return {"eda_insights": eda_insights, "error": None}
+    except Exception as e:
+        return {"error": f"EDA Agent failed: {e}"}
 
 def run_automl_node(state: GraphState) -> GraphState:
     """Agent: PyCaret AutoML"""
     df = state.get("dataset")
     if df is None: return {"error": "No dataset for AutoML."}
 
-    report = run_pycaret_auto_ml(df)
-    
-    # Parse the primary metric (assumes the report structure returns Best Accuracy)
-    # This is brittle, but necessary to get the numeric value for the Orchestrator
-    accuracy_match = re.search(r"Primary Metric \((.*?)\): (\d\.\d{4})", report)
-    accuracy = float(accuracy_match.group(2)) if accuracy_match else None
-    
-    return {"ml_report": report, "accuracy": accuracy, "error": None}
+    try:
+        report = run_pycaret_auto_ml(df)
+        
+        accuracy_match = re.search(r"Primary Metric \((.*?)\): (\d\.\d{4})", report)
+        accuracy = float(accuracy_match.group(2)) if accuracy_match else None
+        
+        return {"ml_report": report, "accuracy": accuracy, "error": None}
+    except Exception as e:
+        return {"error": f"AutoML Agent failed: {e}"}
 
 def generate_rca_node(state: GraphState) -> GraphState:
     """Agent: Model Evaluation & RCA"""
@@ -90,16 +93,18 @@ def generate_rca_node(state: GraphState) -> GraphState:
 
     print("Agent: RCA & Business Impact - Analyzing via LLM.")
 
-    # LLM Call (Agent 2): Generate RCA and business impact analysis
-    prompt = f"""
-    Analyze the following ML report:\n{report}\n and the primary metric {accuracy:.4f}.
-    Generate two short, simple paragraphs: 
-    1. **Root Cause Analysis (RCA):** Why the model performed as it did (e.g., factors contributing to the score).
-    2. **Business Impact/Solution:** What the prediction means for the client's business decisions (e.g., focusing resources based on feature importance).
-    """
-    rca_business_impact = llm.invoke(prompt).content
-    
-    return {"rca_business_impact": rca_business_impact, "error": None}
+    try:
+        prompt = f"""
+        Analyze the following ML report:\n{report}\n and the primary metric {accuracy:.4f}.
+        Generate two short, simple paragraphs: 
+        1. **Root Cause Analysis (RCA):** Why the model performed as it did (e.g., factors contributing to the score).
+        2. **Business Impact/Solution:** What the prediction means for the client's business decisions (e.g., focusing resources based on feature importance).
+        """
+        rca_business_impact = llm.invoke(prompt).content
+        
+        return {"rca_business_impact": rca_business_impact, "error": None}
+    except Exception as e:
+        return {"error": f"RCA Agent failed: {e}"}
 
 def orchestrator_node(state: GraphState) -> GraphState:
     """Agent: Orchestrator, Monitoring, Approval, and Communication (Final Decision)"""
@@ -109,10 +114,7 @@ def orchestrator_node(state: GraphState) -> GraphState:
         return {"error": "Orchestrator failed: Missing accuracy score."}
 
     # 1. Approval Logic
-    if TARGET_ACCURACY_MIN <= accuracy <= TARGET_ACCURACY_MAX:
-        status = "APPROVED"
-    else:
-        status = "REJECTED_LOW_ACCURACY"
+    status = "APPROVED" if TARGET_ACCURACY_MIN <= accuracy <= TARGET_ACCURACY_MAX else "REJECTED_LOW_ACCURACY"
         
     # 2. Email Generation (Using LLM outputs)
     if status == "APPROVED":
@@ -138,7 +140,6 @@ Your Agentic AI Team
 """
     else: # REJECTED_LOW_ACCURACY
         subject = "URGENT: Request for More Data - Initial Model Accuracy Low"
-        # The LLM output is used here to explain the lack of patterns
         body = f"""Dear Client,
 
 Thank you for sending the dataset. After running our comprehensive AutoML process, the model achieved a metric of only **{accuracy*100:.2f}%**. This is below our minimum reliability target of {TARGET_ACCURACY_MIN*100:.0f}%.
@@ -166,24 +167,23 @@ Your Agentic AI Team
 # --- 4. LANGGRAPH WORKFLOW SETUP ---
 workflow = StateGraph(GraphState)
 
-# Add Nodes (5 Agents implemented as nodes)
+# Add Nodes
 workflow.add_node("ingest_data", ingest_data_node)
 workflow.add_node("generate_eda", generate_eda_node)
 workflow.add_node("run_automl", run_automl_node)
 workflow.add_node("generate_rca", generate_rca_node)
-workflow.add_node("orchestrator", orchestrator_node) # Also acts as the monitoring agent
+workflow.add_node("orchestrator", orchestrator_node)
 
-# Set the entry point and sequential flow
+# Set the flow
 workflow.set_entry_point("ingest_data")
 workflow.add_edge("ingest_data", "generate_eda")
 workflow.add_edge("generate_eda", "run_automl")
 workflow.add_edge("run_automl", "generate_rca")
 workflow.add_edge("generate_rca", "orchestrator")
 
-# End the graph after the final communication
+# End the graph
 workflow.add_edge("orchestrator", END)
 
-# Compile the Graph
 app = workflow.compile()
 
 if __name__ == "__main__":
@@ -196,5 +196,13 @@ if __name__ == "__main__":
         final_state = app.invoke({})
 
         print("\n--- Final Workflow Summary ---")
-        print(f"Status: {final_state['workflow_output']}")
-        print(f"Model Accuracy: {final_state.get('accuracy')}")
+        
+        # --- CORRECTED ERROR CHECK ---
+        if final_state.get('error'):
+            # If any node failed, the 'error' key will be populated
+            print("Status: FAILED")
+            print(f"Error Message: {final_state['error']}")
+        else:
+            # If the workflow completed, the 'workflow_output' key will be present
+            print(f"Status: {final_state['workflow_output']}")
+            print(f"Model Accuracy: {final_state.get('accuracy')}")
