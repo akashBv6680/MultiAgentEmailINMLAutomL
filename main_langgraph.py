@@ -1,15 +1,15 @@
 import os
 import re
-import traceback # CRITICAL for debugging failures
+import traceback 
 from typing import TypedDict, Optional
 from dotenv import load_dotenv
 import pandas as pd
 from langgraph.graph import StateGraph, END
 from langchain_community.chat_models import ChatOllama 
 
-# --- FIX: Only import the 'tools' module. This prevents LangChain wrapper issues. ---
+# --- Import the tools module ---
 import tools 
-# ----------------------------------------------------------------------------------
+# -------------------------------
 
 load_dotenv()
 
@@ -34,8 +34,9 @@ class GraphState(TypedDict):
 
 
 # --- 3. AGENT NODES (TASKS) ---
+
 def ingest_data_node(state: GraphState) -> GraphState:
-    """Agent: Data Ingestion & Preparation (Final Working Version)"""
+    """Agent: Data Ingestion & Preparation"""
     try:
         # Calls the function using module prefix (tools.) 
         df = tools.download_dataset_from_email() 
@@ -56,8 +57,9 @@ def generate_eda_node(state: GraphState) -> GraphState:
     print("Agent: EDA & Insight - Generating summary via LLM.")
     
     try:
+        # Removed .to_markdown() for compatibility, using .head() string representation
         prompt = f"""
-        Based only on the data summary:\n{df.head().to_markdown()}\n and the columns: {df.columns.tolist()}. 
+        Based only on the data summary:\n{df.head().to_string()}\n and the columns: {df.columns.tolist()}. 
         Generate a simple, non-technical, high-level **Insights** and **Conclusion** (max 5 lines) 
         that a client can understand. Focus on the distribution of key features and their possible relation to the target ({df.columns[-1]}).
         """
@@ -65,28 +67,31 @@ def generate_eda_node(state: GraphState) -> GraphState:
         
         return {"eda_insights": eda_insights, "error": None}
     except Exception as e:
-        # Keeping error handling simple here, as the LLM call is usually reliable
         return {"error": f"EDA Agent failed: LLM Call Error: {e}"} 
 
 def run_automl_node(state: GraphState) -> GraphState:
-    """Agent: PyCaret AutoML (NOW WITH DEBUGGING)"""
+    """Agent: Manual Scikit-learn Training & Report Generation"""
     df = state.get("dataset")
-    if df is None: return {"error": "No dataset for AutoML."}
+    if df is None: return {"error": "No dataset for ML training."}
     
     try:
-        # Calling the function using module prefix (tools.)
-        report = tools.run_pycaret_auto_ml(df)
+        # 1. Run Manual ML Training (returns report string and R2 score)
+        report, accuracy = tools.run_manual_ml(df)
         
-        accuracy_match = re.search(r"Primary Metric \((.*?)\): (\d\.\d{4})", report)
-        accuracy = float(accuracy_match.group(2)) if accuracy_match else None
+        if accuracy is None:
+            # Check if the manual function returned an error string
+            return {"error": f"ML Training Agent failed: {report}"}
+
+        # 2. Generate Visualizations (Saves file but doesn't return it)
+        tools.generate_visualizations(df)
         
         return {"ml_report": report, "accuracy": accuracy, "error": None}
+    
     except Exception as e:
-        # --- CRITICAL DEBUG CODE ADDED HERE ---
-        print(f"AutoML Agent caught exception: {e}")
+        print(f"ML Training Agent caught unhandled exception: {e}")
         full_trace = traceback.format_exc()
-        return {"error": f"AutoML Agent failed: {e}\n\nFull Trace:\n{full_trace}"}
-        # --------------------------------------
+        return {"error": f"ML Training Agent failed: Unhandled Exception: {e}\n\nFull Trace:\n{full_trace}"}
+
 
 def generate_rca_node(state: GraphState) -> GraphState:
     """Agent: Model Evaluation & RCA (Uses Ollama)"""
@@ -98,9 +103,9 @@ def generate_rca_node(state: GraphState) -> GraphState:
 
     try:
         prompt = f"""
-        Analyze the following ML report:\n{report}\n and the primary metric {accuracy:.4f}.
+        Analyze the following ML report:\n{report}\n and the primary metric {accuracy:.4f} (R-squared score).
         Generate two short, simple paragraphs: 
-        1. **Root Cause Analysis (RCA):** Why the model performed as it did (e.g., factors contributing to the score).
+        1. **Root Cause Analysis (RCA):** Why the model performed as it did (e.g., factors contributing to the score, model selection).
         2. **Business Impact/Solution:** What the prediction means for the client's business decisions (e.g., focusing resources based on feature importance).
         """
         rca_business_impact = llm.invoke(prompt).content
@@ -113,25 +118,54 @@ def generate_rca_node(state: GraphState) -> GraphState:
 def orchestrator_node(state: GraphState) -> GraphState:
     """Agent: Orchestrator, Monitoring, Approval, and Communication (Final Decision)"""
     accuracy = state.get("accuracy")
-    
-    # This check is what you're seeing; the goal is to fix the node that fails *before* this.
+    eda_insights = state.get("eda_insights")
+    rca_business_impact = state.get("rca_business_impact")
+    ml_report = state.get("ml_report")
+
+    # This check is what was failing, but should now pass after manual ML
     if accuracy is None:
         return {"error": "Orchestrator failed: Missing accuracy score."}
 
     # Using tools. prefix for constants
     status = "APPROVED" if tools.TARGET_ACCURACY_MIN <= accuracy <= tools.TARGET_ACCURACY_MAX else "REJECTED_LOW_ACCURACY"
+    
+    # Ensure client target email is set
+    if not CLIENT_EMAIL_TARGET:
+        return {"error": "CLIENT_EMAIL_TARGET environment variable is not set."}
         
-    # Email generation logic remains the same... 
+    # Email generation logic
+    subject = ""
     if status == "APPROVED":
-        subject = "SUCCESS: Comprehensive ML Analysis and Business Insights"
+        subject = f"SUCCESS: ML Analysis Complete - High Confidence (R2: {accuracy:.4f})"
         body = f"""Dear Client,
-        ... [Full Success Email Body] ...
-        """
+We have successfully analyzed your data and completed the machine learning model training.
+
+--- Summary ---
+Status: APPROVED (R-squared Score: {accuracy:.4f})
+{rca_business_impact}
+
+--- Raw Report ---
+{ml_report}
+
+--- EDA Insights ---
+{eda_insights}
+
+A visual report (visual_report.pdf) was also generated locally.
+"""
     else:
-        subject = "URGENT: Request for More Data - Initial Model Accuracy Low"
+        subject = f"URGENT: Request for More Data - Low Model Confidence (R2: {accuracy:.4f})"
         body = f"""Dear Client,
-        ... [Full Failure Email Body] ...
-        """
+The machine learning model training completed, but the confidence score (R-squared) of {accuracy:.4f} is below our minimum threshold of {tools.TARGET_ACCURACY_MIN:.2f}.
+
+--- RCA Summary ---
+{rca_business_impact}
+
+To improve the model's performance, we strongly recommend:
+1. Providing a larger dataset.
+2. Including more relevant features/variables.
+
+We await your feedback to proceed.
+"""
     
     # Calling the function using module prefix (tools.)
     email_sent = tools.send_client_email(subject, body, CLIENT_EMAIL_TARGET)
@@ -171,4 +205,4 @@ if __name__ == "__main__":
             print(f"Error Message: {final_state['error']}")
         else:
             print(f"Status: {final_state['workflow_output']}")
-            print(f"Model Accuracy: {final_state.get('accuracy')}")
+            print(f"Model Accuracy (R2): {final_state.get('accuracy')}")
