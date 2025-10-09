@@ -1,11 +1,13 @@
 # Core Agent and LLM Libraries
 langchain
-langchain-community # For ChatOllama
+langchain-community 
 langgraph
 pydantic
 python-dotenv
 
-# Data Science and AutoML
+# Data Science and Manual ML/Visualization
 pandas
 numpy
-pycaret
+scikit-learn
+matplotlib
+seaborn
