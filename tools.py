@@ -12,9 +12,9 @@ import re
 # --- NEW ML/VISUALIZATION IMPORTS ---
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.metrics import r2_score, accuracy_score
+from sklearn.metrics import r2_score, accuracy_score # Added accuracy_score
 from sklearn.pipeline import make_pipeline
-from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier # SWITCHING TO DT FOR ULTIMATE STABILITY
+from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier # Using DT for stability
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -58,9 +58,9 @@ def download_dataset_from_email() -> pd.DataFrame:
         mail.login(AGENT_EMAIL, AGENT_PASSWORD)
         mail.select('inbox')
         
-        # --- CRITICAL IMAP FIX: Search ALL to guarantee finding the existing email ---
+        # --- CRITICAL FIX: Use ALL search with OR logic for subjects ---
         status, email_ids = mail.search(None, f'(ALL {search_query})') 
-        # --------------------------------------------------------------------------
+        # --------------------------------------------------------------
         
         if not email_ids[0]:
             raise FileNotFoundError(f"No emails found matching any of the subject filters: {SUBJECT_FILTERS}")
@@ -108,7 +108,7 @@ def run_manual_ml(df: pd.DataFrame) -> tuple[str, float]:
     target_col = df_processed.columns[-1]
     
     # 1. Determine Task Type (Classification vs. Regression)
-    # Use a high threshold (50 unique values) for numerical targets to be considered REGRESSION.
+    # Using a threshold of 50 unique values for numerical targets to be considered REGRESSION.
     is_regression = np.issubdtype(df_processed[target_col].dtype, np.number) and df_processed[target_col].nunique() > 50
     
     try:
@@ -145,6 +145,7 @@ def run_manual_ml(df: pd.DataFrame) -> tuple[str, float]:
         model_instance = Model_class(random_state=42)
         pipeline = make_pipeline(StandardScaler(), model_instance)
         
+        # This is the resource-heavy step, minimized by using DecisionTree
         pipeline.fit(X_train, y_train)
         y_pred = pipeline.predict(X_test)
         
@@ -176,6 +177,7 @@ def run_manual_ml(df: pd.DataFrame) -> tuple[str, float]:
         
     except Exception as e:
         # If any crash occurs, return the error to the orchestrator
+        print(f"Critical ML Error: {e}")
         return f"Manual ML Error (CRITICAL FAILURE): {e}", None
 
 
