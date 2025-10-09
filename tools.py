@@ -3,14 +3,25 @@ import os
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from pycaret.classification import setup, compare_models, pull
 from langchain.tools import tool 
 import imaplib
 import email
 import io
 import re
 
-# Target accuracy constants
+# --- NEW ML/VISUALIZATION IMPORTS ---
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.metrics import r2_score
+from sklearn.pipeline import make_pipeline
+from sklearn.ensemble import RandomForestRegressor
+from matplotlib.backends.backend_pdf import PdfPages
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+# ------------------------------------
+
+# Target accuracy constants (Now representing R2 score)
 TARGET_ACCURACY_MIN = 0.80
 TARGET_ACCURACY_MAX = 0.90
 
@@ -31,11 +42,11 @@ def download_dataset_from_email() -> pd.DataFrame:
     print(f"Tool: Attempting to connect to email server for data... (Filter: '{subject_filter}')")
 
     try:
+        # Robust IMAP connection and search
         mail = imaplib.IMAP4_SSL('imap.gmail.com', 993) 
         mail.login(AGENT_EMAIL, AGENT_PASSWORD)
         mail.select('inbox')
         
-        # Robust IMAP search syntax
         status, email_ids = mail.search(None, f'(UNSEEN SUBJECT "{subject_filter}")') 
         
         if not email_ids[0]:
@@ -77,37 +88,109 @@ def download_dataset_from_email() -> pd.DataFrame:
         print(f"Tool: Failed to fetch email or attachment. Error: {e}")
         raise
 
-# @tool decorator is REMOVED
-def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
-    """Performs PyCaret AutoML..."""
-    print("Tool: Starting PyCaret AutoML process...")
+# ------------------------------------------------------------------------------------
+# --- NEW ML & VISUALIZATION FUNCTIONS (REPLACING PyCARET) ---
+# ------------------------------------------------------------------------------------
+
+def run_manual_ml(df: pd.DataFrame) -> tuple[str, float]:
+    """
+    Performs manual ML using Scikit-learn (RandomForestRegressor)
+    with dynamic preprocessing, bypassing PyCaret resource issues.
+    """
+    print("Tool: Starting Manual Scikit-learn ML training (RandomForestRegressor)...")
     try:
-        target_col = df.columns[-1] 
+        # 1. Preprocessing (DYNAMICALLY handle ALL features)
+        df_processed = df.copy()
+        target_col = df_processed.columns[-1]
         
-        # CRITICAL FIX: Set cross-validation folds to 1 for minimal resource use and fastest execution
-        setup(df, target=target_col, silent=True, verbose=False, session_id=42, fold=1) 
+        # Identify categorical columns (excluding the target column)
+        categorical_cols = df_processed.select_dtypes(include=['object']).columns.tolist()
         
-        # Limit models to prevent memory/CPU crash
-        best_model = compare_models(
-            n_select=1, 
-            exclude=['lightgbm', 'xgboost', 'catboost', 'svm', 'rbfsvm', 'ridge'] 
-        )
+        # --- DYNAMIC ENCODING LOGIC ---
+        for col in categorical_cols:
+            # If a categorical column is binary (2 unique values), use LabelEncoder
+            if df_processed[col].nunique() == 2:
+                le = LabelEncoder()
+                df_processed[col] = le.fit_transform(df_processed[col])
+            # If it has more than 2 unique values, it will be handled by get_dummies below
         
-        metrics = pull()
-        primary_metric = metrics.columns[1] 
-        best_metric_value = metrics.loc[metrics['Model'] == best_model.__class__.__name__, primary_metric].iloc[0]
+        # One-Hot Encoding for all remaining 'object' columns
+        df_processed = pd.get_dummies(df_processed, drop_first=True)
+
+        # 2. Define Features (X) and Target (y)
+        X = df_processed.drop(columns=[target_col])
+        y = df_processed[target_col]
+
+        # 3. Split Data
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+        # 4. Create and Train Pipeline (Scaling + Model)
+        # Using RFR for the regression problem
+        model = make_pipeline(StandardScaler(), RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1))
+        model.fit(X_train, y_train)
+
+        # 5. Evaluate (using R2 score as the accuracy metric)
+        y_pred = model.predict(X_test)
+        r2 = r2_score(y_test, y_pred)
+        
+        # 6. Generate Report (Feature Importance)
+        feature_importance = pd.Series(model.named_steps['randomforestregressor'].feature_importances_, index=X.columns)
+        top_features = feature_importance.nlargest(5).to_string()
         
         report = (
-            f"PyCaret Auto-Detected Task: {setup(df, target=target_col, silent=True, verbose=False, fold=1).pipeline.steps[0][0]}\n"
-            f"Best Model Found: {best_model.__class__.__name__}\n"
-            f"Primary Metric ({primary_metric}): {best_metric_value:.4f}\n"
-            f"Full Metrics:\n{metrics.to_string()}"
+            f"Manual ML Training Completed (RandomForestRegressor):\n"
+            f"Test Set R-squared Score (Accuracy Metric): {r2:.4f}\n"
+            f"-------------------------------------------\n"
+            f"Model Configuration:\n"
+            f"- Model: RandomForestRegressor\n"
+            f"- Preprocessing: Standard Scaling + Dynamic Encoding\n"
+            f"-------------------------------------------\n"
+            f"Top 5 Feature Importance:\n{top_features}"
         )
-        print("Tool: PyCaret completed.")
-        return report
+        print("Tool: Manual ML training completed.")
+        return report, r2
+        
     except Exception as e:
-        # Returning a clear error report if PyCaret fails
-        return f"PyCaret Error: Failed to run AutoML. Error: {e}"
+        # Include the full error in the string for debugging if needed
+        return f"Manual ML Error: {e}", None
+
+
+def generate_visualizations(df):
+    """Generates visualizations and saves them to a PDF file."""
+    pdf_name = "visual_report.pdf"
+    plt.ioff()
+    
+    with PdfPages(pdf_name) as pdf:
+        for col in df.columns:
+            plt.figure(figsize=(6, 4))
+            
+            # Categorical/Low-Unique Count
+            if df[col].dtype == "object" or df[col].nunique() < 10:
+                if df[col].nunique() <= 5:
+                    df[col].value_counts().plot.pie(autopct='%1.1f%%')
+                    plt.title(f"Pie Chart - {col}")
+                else:
+                    sns.countplot(y=col, data=df)
+                    plt.title(f"Bar Chart - {col}")
+            # Numeric Data
+            elif np.issubdtype(df[col].dtype, np.number):
+                if df[col].nunique() < 20:
+                    sns.histplot(df[col], kde=False)
+                    plt.title(f"Hist Plot - {col}")
+                else:
+                    sns.kdeplot(df[col], fill=True)
+                    plt.title(f"Dist Plot - {col}")
+            else:
+                plt.close()
+                continue
+
+            plt.tight_layout()
+            pdf.savefig()
+            plt.close()
+            
+    print(f"Tool: Visualizations saved to {pdf_name}")
+    return pdf_name
+
 
 # @tool decorator is REMOVED
 def send_client_email(subject: str, body: str, to_email: str) -> bool:
