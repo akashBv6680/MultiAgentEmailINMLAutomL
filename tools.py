@@ -31,11 +31,12 @@ def download_dataset_from_email() -> pd.DataFrame:
     print(f"Tool: Attempting to connect to email server for data... (Filter: '{subject_filter}')")
 
     try:
+        # Connect with explicit port 993 (fixes connection errors)
         mail = imaplib.IMAP4_SSL('imap.gmail.com', 993) 
         mail.login(AGENT_EMAIL, AGENT_PASSWORD)
         mail.select('inbox')
         
-        # Robust IMAP search syntax
+        # Robust IMAP search syntax (fixes BAD command error)
         status, email_ids = mail.search(None, f'(UNSEEN SUBJECT "{subject_filter}")') 
         
         if not email_ids[0]:
@@ -77,7 +78,7 @@ def download_dataset_from_email() -> pd.DataFrame:
         print(f"Tool: Failed to fetch email or attachment. Error: {e}")
         raise
 
-# --- FIX: PyCaret Model Optimization to prevent resource crash ---
+# @tool decorator is REMOVED
 def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
     """Performs PyCaret AutoML..."""
     print("Tool: Starting PyCaret AutoML process...")
@@ -85,7 +86,7 @@ def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
         target_col = df.columns[-1] 
         setup(df, target=target_col, silent=True, verbose=False, session_id=42) 
         
-        # CRITICAL CHANGE: Exclude resource-heavy models to prevent memory/CPU crash
+        # CRITICAL CHANGE: Limit models to prevent memory/CPU crash on GitHub Actions
         best_model = compare_models(
             n_select=1, 
             exclude=['lightgbm', 'xgboost', 'catboost', 'svm', 'rbfsvm', 'ridge'] 
