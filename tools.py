@@ -31,7 +31,6 @@ def download_dataset_from_email() -> pd.DataFrame:
     print(f"Tool: Attempting to connect to email server for data... (Filter: '{subject_filter}')")
 
     try:
-        # Connect with explicit port 993 
         mail = imaplib.IMAP4_SSL('imap.gmail.com', 993) 
         mail.login(AGENT_EMAIL, AGENT_PASSWORD)
         mail.select('inbox')
@@ -85,8 +84,8 @@ def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
     try:
         target_col = df.columns[-1] 
         
-        # CRITICAL FIX: Reduce cross-validation folds from 10 to 3 for resource efficiency
-        setup(df, target=target_col, silent=True, verbose=False, session_id=42, fold=3) 
+        # CRITICAL FIX: Set cross-validation folds to 1 for minimal resource use and fastest execution
+        setup(df, target=target_col, silent=True, verbose=False, session_id=42, fold=1) 
         
         # Limit models to prevent memory/CPU crash
         best_model = compare_models(
@@ -99,7 +98,7 @@ def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
         best_metric_value = metrics.loc[metrics['Model'] == best_model.__class__.__name__, primary_metric].iloc[0]
         
         report = (
-            f"PyCaret Auto-Detected Task: {setup(df, target=target_col, silent=True, verbose=False).pipeline.steps[0][0]}\n"
+            f"PyCaret Auto-Detected Task: {setup(df, target=target_col, silent=True, verbose=False, fold=1).pipeline.steps[0][0]}\n"
             f"Best Model Found: {best_model.__class__.__name__}\n"
             f"Primary Metric ({primary_metric}): {best_metric_value:.4f}\n"
             f"Full Metrics:\n{metrics.to_string()}"
