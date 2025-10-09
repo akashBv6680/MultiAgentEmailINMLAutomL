@@ -4,7 +4,7 @@ import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from pycaret.classification import setup, compare_models, pull
-from langchain.tools import tool # We keep the import, but don't use it on utility functions
+from langchain.tools import tool 
 import imaplib
 import email
 import io
@@ -14,13 +14,12 @@ import re
 TARGET_ACCURACY_MIN = 0.80
 TARGET_ACCURACY_MAX = 0.90
 
-# --- FIX: @tool decorator REMOVED from utility function to avoid Pydantic conflict ---
+# @tool decorator is REMOVED
 def download_dataset_from_email() -> pd.DataFrame:
     """
     Connects to the email client, searches for the latest email with a data file (CSV), 
     downloads the attachment, and returns it as a pandas DataFrame.
     """
-    # Hardcode the filter inside the function body
     subject_filter: str = 'Problem statement' 
     
     AGENT_EMAIL = os.environ.get("AGENT_EMAIL")
@@ -32,12 +31,11 @@ def download_dataset_from_email() -> pd.DataFrame:
     print(f"Tool: Attempting to connect to email server for data... (Filter: '{subject_filter}')")
 
     try:
-        # Connect with explicit port 993 and robust search syntax (fixes BAD command error)
         mail = imaplib.IMAP4_SSL('imap.gmail.com', 993) 
         mail.login(AGENT_EMAIL, AGENT_PASSWORD)
         mail.select('inbox')
         
-        # 2. Search for the latest email
+        # Robust IMAP search syntax
         status, email_ids = mail.search(None, f'(UNSEEN SUBJECT "{subject_filter}")') 
         
         if not email_ids[0]:
@@ -49,11 +47,11 @@ def download_dataset_from_email() -> pd.DataFrame:
 
         latest_email_id = email_ids[0].split()[-1]
         status, msg_data = mail.fetch(latest_email_id, '(RFC822)')
-        mail.store(latest_email_id, '+FLAGS', '\\Seen') # Mark as read
+        mail.store(latest_email_id, '+FLAGS', '\\Seen') 
 
         msg = email.message_from_bytes(msg_data[0][1])
 
-        # 3. Find and Download the CSV/TXT Attachment
+        # Find and Download the CSV/TXT Attachment
         for part in msg.walk():
             if part.get_content_maintype() == 'multipart':
                 continue
@@ -79,15 +77,20 @@ def download_dataset_from_email() -> pd.DataFrame:
         print(f"Tool: Failed to fetch email or attachment. Error: {e}")
         raise
 
-# --- FIX: @tool decorator REMOVED to avoid Pydantic conflict (DataFrame validation) ---
+# --- FIX: PyCaret Model Optimization to prevent resource crash ---
 def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
     """Performs PyCaret AutoML..."""
     print("Tool: Starting PyCaret AutoML process...")
     try:
         target_col = df.columns[-1] 
-        # Using verbose=False and silent=True to reduce log output in the runner
         setup(df, target=target_col, silent=True, verbose=False, session_id=42) 
-        best_model = compare_models()
+        
+        # CRITICAL CHANGE: Exclude resource-heavy models to prevent memory/CPU crash
+        best_model = compare_models(
+            n_select=1, 
+            exclude=['lightgbm', 'xgboost', 'catboost', 'svm', 'rbfsvm', 'ridge'] 
+        )
+        
         metrics = pull()
         primary_metric = metrics.columns[1] 
         best_metric_value = metrics.loc[metrics['Model'] == best_model.__class__.__name__, primary_metric].iloc[0]
@@ -104,7 +107,7 @@ def run_pycaret_auto_ml(df: pd.DataFrame) -> str:
         # Returning a clear error report if PyCaret fails
         return f"PyCaret Error: Failed to run AutoML. Error: {e}"
 
-# --- FIX: @tool decorator REMOVED to avoid Pydantic conflict ---
+# @tool decorator is REMOVED
 def send_client_email(subject: str, body: str, to_email: str) -> bool:
     """Sends the final formatted email to the client."""
     AGENT_EMAIL = os.environ.get("AGENT_EMAIL")
