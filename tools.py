@@ -1,3 +1,4 @@
+
 import pandas as pd
 import os
 import smtplib
@@ -12,58 +13,49 @@ import re
 # --- NEW ML/VISUALIZATION IMPORTS ---
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.metrics import r2_score, accuracy_score # Added accuracy_score
+from sklearn.metrics import r2_score
 from sklearn.pipeline import make_pipeline
-from sklearn.tree import DecisionTreeRegressor, DecisionTreeClassifier # Using DT for stability
+from sklearn.ensemble import RandomForestRegressor
+from matplotlib.backends.backend_pdf import PdfPages
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 # ------------------------------------
 
-# Target accuracy constants (Now representing R2 or Accuracy score)
+# Target accuracy constants (Now representing R2 score)
 TARGET_ACCURACY_MIN = 0.80
 TARGET_ACCURACY_MAX = 0.90
-
-# --- Expanded Subject Filter List ---
-SUBJECT_FILTERS = [
-    'problem statement', 
-    'business problem', 
-    'business use case', 
-    'project details', 
-    'analysis the project', 
-    'dataanalysis project details'
-]
-# -----------------------------------------
 
 # @tool decorator is REMOVED
 def download_dataset_from_email() -> pd.DataFrame:
     """
-    Connects to the email client, searches for the latest email with a data file (CSV) 
-    matching ANY of the defined subject filters, downloads, and returns it.
+    Connects to the email client, searches for the latest email with a data file (CSV), 
+    downloads the attachment, and returns it as a pandas DataFrame.
     """
+    subject_filter: str = 'Problem statement' 
+    
     AGENT_EMAIL = os.environ.get("AGENT_EMAIL")
     AGENT_PASSWORD = os.environ.get("AGENT_PASSWORD")
     
     if not AGENT_EMAIL or not AGENT_PASSWORD:
         raise ValueError("Email credentials (AGENT_EMAIL, AGENT_PASSWORD) not found in environment.")
 
-    # Create the IMAP search query for multiple subjects
-    search_terms = [f'SUBJECT "{s}"' for s in SUBJECT_FILTERS]
-    search_query = f'(OR {" ".join(search_terms)})'
-    
-    print(f"Tool: Attempting to connect to email server for data... (Filters: {SUBJECT_FILTERS})")
+    print(f"Tool: Attempting to connect to email server for data... (Filter: '{subject_filter}')")
 
     try:
+        # Robust IMAP connection and search
         mail = imaplib.IMAP4_SSL('imap.gmail.com', 993) 
         mail.login(AGENT_EMAIL, AGENT_PASSWORD)
         mail.select('inbox')
         
-        # --- CRITICAL FIX: Use ALL search with OR logic for subjects ---
-        status, email_ids = mail.search(None, f'(ALL {search_query})') 
-        # --------------------------------------------------------------
+        status, email_ids = mail.search(None, f'(UNSEEN SUBJECT "{subject_filter}")') 
         
         if not email_ids[0]:
-            raise FileNotFoundError(f"No emails found matching any of the subject filters: {SUBJECT_FILTERS}")
+            print(f"Tool: No NEW email found. Searching ALL emails with subject '{subject_filter}'.")
+            status, email_ids = mail.search(None, f'(ALL SUBJECT "{subject_filter}")') 
+            
+            if not email_ids[0]:
+                raise FileNotFoundError(f"No emails found with the subject filter: '{subject_filter}'.")
 
         latest_email_id = email_ids[0].split()[-1]
         status, msg_data = mail.fetch(latest_email_id, '(RFC822)')
@@ -98,87 +90,70 @@ def download_dataset_from_email() -> pd.DataFrame:
         raise
 
 # ------------------------------------------------------------------------------------
+# --- NEW ML & VISUALIZATION FUNCTIONS (REPLACING PyCARET) ---
+# ------------------------------------------------------------------------------------
 
 def run_manual_ml(df: pd.DataFrame) -> tuple[str, float]:
     """
-    Performs dynamic ML (Classification/Regression) using a robust Decision Tree
-    to avoid resource and dynamic detection issues.
+    Performs manual ML using Scikit-learn (RandomForestRegressor)
+    with dynamic preprocessing, bypassing PyCaret resource issues.
     """
-    df_processed = df.copy()
-    target_col = df_processed.columns[-1]
-    
-    # 1. Determine Task Type (Classification vs. Regression)
-    # Using a threshold of 50 unique values for numerical targets to be considered REGRESSION.
-    is_regression = np.issubdtype(df_processed[target_col].dtype, np.number) and df_processed[target_col].nunique() > 50
-    
+    print("Tool: Starting Manual Scikit-learn ML training (RandomForestRegressor)...")
     try:
-        # 2. Dynamic Preprocessing
+        # 1. Preprocessing (DYNAMICALLY handle ALL features)
+        df_processed = df.copy()
+        target_col = df_processed.columns[-1]
+        
+        # Identify categorical columns (excluding the target column)
         categorical_cols = df_processed.select_dtypes(include=['object']).columns.tolist()
         
+        # --- DYNAMIC ENCODING LOGIC ---
         for col in categorical_cols:
+            # If a categorical column is binary (2 unique values), use LabelEncoder
             if df_processed[col].nunique() == 2:
                 le = LabelEncoder()
                 df_processed[col] = le.fit_transform(df_processed[col])
+            # If it has more than 2 unique values, it will be handled by get_dummies below
         
+        # One-Hot Encoding for all remaining 'object' columns
         df_processed = pd.get_dummies(df_processed, drop_first=True)
 
-        # 3. Define Features (X) and Target (y)
+        # 2. Define Features (X) and Target (y)
         X = df_processed.drop(columns=[target_col])
         y = df_processed[target_col]
 
-        # 4. Split Data
+        # 3. Split Data
         X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-        # 5. Model Selection (Using Decision Tree for ultimate resource efficiency)
-        if is_regression:
-            print("Tool: Auto-Detected Regression Task. Using DecisionTreeRegressor for stability.")
-            Model_class = DecisionTreeRegressor
-            Metric_func = r2_score
-            Metric_name = "R-squared Score"
-        else:
-            print("Tool: Auto-Detected Classification Task. Using DecisionTreeClassifier for stability.")
-            Model_class = DecisionTreeClassifier
-            Metric_func = accuracy_score
-            Metric_name = "Accuracy Score"
-        
-        # 6. Train and Evaluate (Single, fast model)
-        model_instance = Model_class(random_state=42)
-        pipeline = make_pipeline(StandardScaler(), model_instance)
-        
-        # This is the resource-heavy step, minimized by using DecisionTree
-        pipeline.fit(X_train, y_train)
-        y_pred = pipeline.predict(X_test)
-        
-        # Ensure predictions are integers for classification metrics if using numerical labels
-        if not is_regression and np.issubdtype(y_train.dtype, np.number):
-             y_pred = np.round(y_pred).astype(int) 
+        # 4. Create and Train Pipeline (Scaling + Model)
+        # Using RFR for the regression problem
+        model = make_pipeline(StandardScaler(), RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1))
+        model.fit(X_train, y_train)
 
-        accuracy = Metric_func(y_test, y_pred)
-        best_model_name = Model_class.__name__
-
-        # 7. Generate Report
+        # 5. Evaluate (using R2 score as the accuracy metric)
+        y_pred = model.predict(X_test)
+        r2 = r2_score(y_test, y_pred)
         
-        # Feature Importance
-        if hasattr(model_instance, 'feature_importances_'):
-            feature_importance = pd.Series(model_instance.feature_importances_, index=X.columns)
-            top_features_report = feature_importance.nlargest(5).to_string()
-        else:
-            top_features_report = "Feature importance not available for this model."
-
+        # 6. Generate Report (Feature Importance)
+        feature_importance = pd.Series(model.named_steps['randomforestregressor'].feature_importances_, index=X.columns)
+        top_features = feature_importance.nlargest(5).to_string()
+        
         report = (
-            f"Manual ML Training Completed ({'Regression' if is_regression else 'Classification'}):\n"
-            f"Best Model Selected: {best_model_name}\n"
-            f"Test Set {Metric_name} (Accuracy Metric): {accuracy:.4f}\n"
+            f"Manual ML Training Completed (RandomForestRegressor):\n"
+            f"Test Set R-squared Score (Accuracy Metric): {r2:.4f}\n"
             f"-------------------------------------------\n"
-            f"Top 5 Feature Importance:\n{top_features_report}"
+            f"Model Configuration:\n"
+            f"- Model: RandomForestRegressor\n"
+            f"- Preprocessing: Standard Scaling + Dynamic Encoding\n"
+            f"-------------------------------------------\n"
+            f"Top 5 Feature Importance:\n{top_features}"
         )
         print("Tool: Manual ML training completed.")
-        return report, accuracy
+        return report, r2
         
     except Exception as e:
-        # If any crash occurs, return the error to the orchestrator
-        print(f"Critical ML Error: {e}")
-        return f"Manual ML Error (CRITICAL FAILURE): {e}", None
+        # Include the full error in the string for debugging if needed
+        return f"Manual ML Error: {e}", None
 
 
 def generate_visualizations(df):
