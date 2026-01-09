@@ -2,34 +2,17 @@ name: Agentic ML Workflow Scheduler (LangGraph)
 
 on:
   schedule:
-    - cron: '0 5 * * *'
+    - cron: '0 5 * * *' # Runs at 05:00 UTC every day
   workflow_dispatch: 
 
 jobs:
   run_ml_agent:
     runs-on: ubuntu-latest
     
-    # --- START: Ollama Service Definition ---
-    services:
-      ollama_service:
-        # Use the latest Ollama image
-        image: ollama/ollama:latest 
-        ports:
-          # Maps the container port 11434 to the runner's localhost port 11434
-          - 11434:11434
-        options: >-
-          --name ollama_service
-          --health-cmd="ollama -v"
-          --health-interval=10s
-          --health-timeout=5s
-          --health-retries=5
-    # --- END: Ollama Service Definition ---
-
     env:
-      # Set the host accessible by the Python script
-      OLLAMA_HOST: http://localhost:11434
-      # Define the model to be pulled and used by the Python script
-      LLM_MODEL_NAME: tinyllama # We'll use tinyllama for efficiency
+      # Define the Gemini model to be used by the Python script
+      # Using gemini-1.5-flash for speed and efficiency in agentic loops
+      GEMINI_MODEL_NAME: "gemini-1.5-flash"
       
     steps:
       - name: Checkout repository
@@ -45,24 +28,15 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      # --- CRITICAL STEP: Pull the required model into the service container ---
-      # This waits for the service to be healthy and then pulls the model.
-      - name: Pull Ollama Model
-        run: |
-          # Wait for Ollama service to start and be healthy
-          for i in {1..10}; do 
-            curl -sSf ${OLLAMA_HOST} && break || sleep 5; 
-          done
-          # Pull the required model using the service endpoint
-          docker exec ollama_service ollama pull ${LLM_MODEL_NAME}
-        shell: bash
-
       - name: Run LangGraph Multi-Agent Automation
         run: python main_langgraph.py
         env:
-          # Pass the GitHub Secrets as environment variables
+          # Google Gemini API Key from GitHub Secrets
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          
+          # Agent credentials
           AGENT_EMAIL: ${{ secrets.AGENT_EMAIL }}
           AGENT_PASSWORD: ${{ secrets.AGENT_PASSWORD }}
-          CLIENT_EMAIL_TARGET: ${{ secrets.CLIENT_EMAIL_TARGET }}
-          # LLM_MODEL_NAME and OLLAMA_HOST are already set as job envs
-          OPENAI_API_KEY: "DUMMY_KEY" # Kept as a placeholder to avoid breaking the code, but it is not used now
+          
+          # Model name passed to the script
+          LLM_MODEL_NAME: ${{ env.GEMINI_MODEL_NAME }}
