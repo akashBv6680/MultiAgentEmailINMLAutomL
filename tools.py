@@ -9,28 +9,39 @@ from google.genai import errors
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 
+# Set the stable model ID
+MODEL_ID = "gemini-2.0-flash" 
+
 def get_gemini_client():
     return genai.Client(api_key=os.getenv("GOOGLE_API_KEY"))
 
 def retry_on_quota(func):
     def wrapper(*args, **kwargs):
         for attempt in range(3):
-            try: return func(*args, **kwargs)
+            try: 
+                return func(*args, **kwargs)
             except Exception as e:
-                if "429" in str(e): time.sleep(5)
-                else: raise e
+                # Handle both Quota (429) and unexpected Model errors
+                if "429" in str(e):
+                    print(f"Quota exceeded, waiting 10s (Attempt {attempt+1})...")
+                    time.sleep(10)
+                elif "404" in str(e):
+                    print("Model ID error. Ensure the model name is correct.")
+                    raise e
+                else: 
+                    raise e
         return func(*args, **kwargs)
     return wrapper
 
 @retry_on_quota
 def find_and_validate_email():
-    """Validates: 1. Problem Statement 2. ML Context 3. Dataset attached."""
+    """Validates conditions: Problem Statement, ML Project context, and Dataset."""
     mail = imaplib.IMAP4_SSL('imap.gmail.com', 993)
     mail.login(os.getenv("AGENT_EMAIL"), os.getenv("AGENT_PASSWORD"))
     mail.select('inbox')
     
     status, messages = mail.search(None, 'ALL')
-    email_ids = messages[0].split()[-5:] # Check last 5 emails
+    email_ids = messages[0].split()[-5:] # Check last 5
     
     client = get_gemini_client()
     
@@ -40,15 +51,21 @@ def find_and_validate_email():
         subject = str(msg['Subject'])
         sender = str(msg['From'])
         
-        # Check for dataset
+        # Check for dataset attachment
         has_dataset = any(p.get_filename() and p.get_filename().lower().endswith(('.csv', '.txt')) for p in msg.walk())
         
-        prompt = f"Analyze this email. Does it have a clear Problem Statement and an ML project request? Dataset attached: {has_dataset}. Subject: {subject}. Reply 'VALID' or 'INVALID'."
-        response = client.models.generate_content(model="gemini-1.5-flash", contents=prompt)
+        # Validation prompt
+        prompt = (f"Analyze this email. Does it have a clear Problem Statement and an ML project request? "
+                  f"Dataset attached: {has_dataset}. Subject: {subject}. Reply ONLY with the word 'VALID' or 'INVALID'.")
         
-        if "VALID" in response.text.upper() and has_dataset:
-            mail.logout()
-            return e_id.decode(), sender, subject
+        try:
+            response = client.models.generate_content(model=MODEL_ID, contents=prompt)
+            if "VALID" in response.text.upper() and has_dataset:
+                mail.logout()
+                return e_id.decode(), sender, subject
+        except Exception as e:
+            print(f"API Call failed for UID {e_id.decode()}: {e}")
+            continue
             
     mail.logout()
     return None, None, None
@@ -66,6 +83,8 @@ def download_dataset_by_uid(uid):
 
 def send_email_report(to_email, subject, body, attachment=None):
     msg = MIMEMultipart()
+    msg['From'] = os.getenv("AGENT_EMAIL")
+    msg['To'] = to_email
     msg['Subject'] = subject
     msg.attach(MIMEText(body, 'plain'))
     if attachment and os.path.exists(attachment):
@@ -78,12 +97,14 @@ def send_email_report(to_email, subject, body, attachment=None):
     with smtplib.SMTP('smtp.gmail.com', 587) as s:
         s.starttls()
         s.login(os.getenv("AGENT_EMAIL"), os.getenv("AGENT_PASSWORD"))
-        s.sendmail(os.getenv("AGENT_EMAIL"), to_email, msg.as_string())
+        s.send_message(msg)
 
 def generate_visualizations(df):
     pdf_name = "analysis_report.pdf"
     with PdfPages(pdf_name) as pdf:
-        df.iloc[:, :5].hist(figsize=(10,6))
+        plt.figure(figsize=(10,6))
+        df.iloc[:, :min(5, len(df.columns))].hist()
+        plt.tight_layout()
         pdf.savefig()
         plt.close()
     return pdf_name
