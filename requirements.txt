@@ -1,30 +1,18 @@
-# Core Agent and LLM Libraries
-langchain
-langchain-community
-langchain-google-genai
-langgraph
-pydantic
-python-dotenv
-
-# Google Gemini API
+# LangGraph & Google AI Orchestration
+langgraph>=0.3.21
+langchain-google-genai>=4.1.3
 google-generativeai>=0.8.0
 
-# Data Science and ML
-pandas
-numpy
-scikit-learn
-matplotlib
-seaborn
+# Data Processing & Machine Learning
+pandas>=2.2.0
+numpy>=1.26.0
+scikit-learn>=1.5.0
+xgboost>=2.1.0
+lightgbm>=4.3.0
 
-# Email Integration
-requests
-email-validator
+# Visualizations & Reporting
+matplotlib>=3.9.0
+seaborn>=0.13.0
 
-# Advanced ML Algorithms
-xgboost
-lightgbm
-gradient-boosting
-
-# Visualization
-pillow
-plotly
+# Utilities
+python-dotenv>=1.0.1
