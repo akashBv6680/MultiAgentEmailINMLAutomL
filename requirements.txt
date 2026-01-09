@@ -1,13 +1,30 @@
 # Core Agent and LLM Libraries
 langchain
-langchain-community 
+langchain-community
+langchain-google-genai
 langgraph
 pydantic
 python-dotenv
 
-# Data Science and Manual ML/Visualization
+# Google Gemini API
+google-generativeai>=0.8.0
+
+# Data Science and ML
 pandas
 numpy
 scikit-learn
 matplotlib
 seaborn
+
+# Email Integration
+requests
+email-validator
+
+# Advanced ML Algorithms
+xgboost
+lightgbm
+gradient-boosting
+
+# Visualization
+pillow
+plotly
