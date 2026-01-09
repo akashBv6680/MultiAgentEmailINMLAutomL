@@ -20,7 +20,6 @@ CLIENT_EMAIL_TARGET = os.getenv("CLIENT_EMAIL_TARGET")
 
 llm = ChatOllama(model=LLM_MODEL_NAME, base_url=OLLAMA_HOST, temperature=0.1)
 
-
 # --- 2. LANGGRAPH STATE DEFINITION (Unchanged) ---
 class GraphState(TypedDict):
     """The shared state passed between agents."""
